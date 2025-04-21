@@ -1,101 +1,85 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from io import BytesIO
+import re
+import io
+from datetime import datetime
 
-st.set_page_config(page_title="GPSSA Case Dashboard", layout="wide")
-st.title("📊 GPSSA Case Dashboard")
-st.caption("Devolved by **Anas H. Alrefai**")
+st.set_page_config(layout="wide")
+st.title("GPSSA Case Dashboard - Full Dataset")
 
-uploaded_file = st.file_uploader("📂 Upload Full Dataset CSV File", type=["csv"])
+uploaded_file = st.file_uploader("Upload Full Dataset CSV", type="csv")
 
 if uploaded_file:
-    try:
-        df = pd.read_csv(uploaded_file)
-        df.columns = df.columns.str.strip()
+    df = pd.read_csv(uploaded_file)
 
-        # Fix missing expected columns
-        rename_map = {
-            "Case Id": "SR Number",
-            "Process Status": "Status",
-            "Current User Id": "User",
-            "Request Type": "Type",
-        }
-        df.rename(columns=rename_map, inplace=True)
+    # Standardize column names
+    df.columns = df.columns.str.strip()
 
-        required_columns = ["User", "Status", "SR Number", "Type"]
-        if not all(col in df.columns for col in required_columns):
-            st.error("⚠️ Required columns not found. Please upload a valid file.")
-        else:
-            st.sidebar.header("Filters")
+    # Extract SR and Incident Numbers from Last Note
+    def extract_reference(note):
+        if pd.isna(note):
+            return None
+        match = re.search(r'(SR|Incident)\s*#?\s*(\d+)', note, re.IGNORECASE)
+        return match.group(2) if match else None
 
-            # User filter with 'DIT Team' option
-            users = sorted(df["User"].dropna().unique().tolist())
-            user_filter = st.sidebar.selectbox("Select User", options=["All", "DIT Team"] + users)
+    def extract_type(note):
+        if pd.isna(note):
+            return None
+        if 'incident' in note.lower():
+            return 'Incident'
+        elif 'sr' in note.lower():
+            return 'SR'
+        return None
 
-            # Type filter (Incident / SR)
-            type_filter = st.sidebar.selectbox("Select Type", options=["All", "Incident", "SR"])
+    df['Ref Number'] = df['Last Note'].apply(extract_reference)
+    df['Ref Type'] = df['Last Note'].apply(extract_type)
 
-            # Search by any text including SR Number, EID, etc.
-            search_text = st.sidebar.text_input("🔍 Search (EID, Mobile, SR Number, etc.)")
+    # Replace NaNs in user field
+    df['Current User Id'] = df['Current User Id'].fillna('Unassigned')
 
-            filtered_df = df.copy()
+    # Add DIT Team grouping
+    dit_team = ['anas.hasan', 'fatima.bero', 'ali.babiker']
+    df['User Group'] = df['Current User Id'].apply(lambda x: 'DIT Team' if x in dit_team else x)
 
-            if user_filter != "All":
-                if user_filter == "DIT Team":
-                    filtered_df = filtered_df[filtered_df["User"].str.contains("DIT", case=False, na=False)]
-                else:
-                    filtered_df = filtered_df[filtered_df["User"] == user_filter]
+    # Add status flags
+    df['Status Group'] = df.apply(lambda row: 'Not Triaged' if pd.isna(row['Last Note']) or row['Last Note'].strip() == ''
+                                   else ('Pending' if 'pending' in str(row['Process Status']).lower() else 'Other'), axis=1)
 
-            if type_filter != "All":
-                filtered_df = filtered_df[filtered_df["Type"].str.contains(type_filter, case=False, na=False)]
+    # Sidebar Filters
+    st.sidebar.header("Filters")
 
-            if search_text:
-                search_text = search_text.strip()
-                mask = pd.Series(False, index=filtered_df.index)
-                for col in filtered_df.columns:
-                    mask |= filtered_df[col].astype(str).str.contains(search_text, case=False, na=False)
-                filtered_df = filtered_df[mask]
+    selected_user = st.sidebar.selectbox("Filter by User or DIT Team", options=['All'] + sorted(df['User Group'].unique()))
+    selected_status = st.sidebar.multiselect("Filter by Status", options=df['Status Group'].unique(), default=df['Status Group'].unique())
+    selected_type = st.sidebar.multiselect("Type (Incident or SR)", options=['SR', 'Incident'], default=['SR', 'Incident'])
 
-            st.subheader("📋 Filtered Case Data")
-            st.write(f"Showing **{len(filtered_df)}** cases")
-            st.dataframe(filtered_df, use_container_width=True)
+    search_value = st.sidebar.text_input("Search by Emirates ID, Mobile, or Note")
 
-            # Download
-            csv = filtered_df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "⬇️ Download Filtered Data as CSV",
-                csv,
-                "filtered_cases.csv",
-                "text/csv",
-                key="download-csv",
-            )
+    # Apply filters
+    filtered_df = df[df['Status Group'].isin(selected_status)]
+    if selected_user != 'All':
+        filtered_df = filtered_df[filtered_df['User Group'] == selected_user]
+    if selected_type:
+        filtered_df = filtered_df[filtered_df['Ref Type'].isin(selected_type)]
+    if search_value:
+        search_value = search_value.lower()
+        filtered_df = filtered_df[filtered_df.apply(lambda row: search_value in str(row['Emirates ID']).lower()
+                                                    or search_value in str(row['mobile Number']).lower()
+                                                    or search_value in str(row['Last Note']).lower(), axis=1)]
 
-            # Grouping for Pending and Not Triaged
-            pending_group = df[df["Status"].str.contains("Pending", case=False, na=False)]
-            not_triaged_group = df[df["Status"].str.contains("Not Triaged", case=False, na=False)]
+    # Group by Ref Number
+    grouped = filtered_df.groupby(['Ref Type', 'Ref Number'])
 
-            st.subheader("🕒 Pending and Not Triaged Cases")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"**Pending Cases: {len(pending_group)}**")
-                st.dataframe(pending_group, use_container_width=True)
-            with col2:
-                st.markdown(f"**Not Triaged Cases: {len(not_triaged_group)}**")
-                st.dataframe(not_triaged_group, use_container_width=True)
+    st.subheader("Grouped Cases by SR/Incident")
+    for (ref_type, ref_number), group in grouped:
+        if pd.isna(ref_number):
+            continue
+        with st.expander(f"{ref_type} #{ref_number} - {len(group)} case(s)"):
+            st.dataframe(group[['Case Id', 'Process Status', 'Category', 'Last Note', 'Current User Id']])
 
-            # Linking SR/Incidents with their cases
-            st.subheader("🔗 SR/Incident Linking")
-            grouped_link = df.groupby(["SR Number", "Type"]).size().reset_index(name="Linked Cases Count")
-            st.dataframe(grouped_link, use_container_width=True)
+    # Show full filtered table
+    st.subheader("Filtered Case List")
+    st.dataframe(filtered_df)
 
-            # Visualization
-            st.subheader("📈 Request Type and Status Breakdown")
-            grouped = df.groupby(["Type", "Status"]).size().reset_index(name="Count")
-            fig = px.bar(grouped, x="Type", y="Count", color="Status", barmode="group", text="Count")
-            st.plotly_chart(fig, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"❌ Error loading file: {e}")
-else:
-    st.warning("📌 Please upload a CSV file to begin.")
+    # Download filtered data
+    csv = filtered_df.to_csv(index=False).encode('utf-8')
+    st.download_button("Download Filtered Data as CSV", csv, "Filtered_Cases.csv", "text/csv")
