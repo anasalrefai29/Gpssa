@@ -5,14 +5,13 @@ import os
 import chardet
 from datetime import datetime
 
-# Set page config
 st.set_page_config(layout="wide", page_title="GPSSA Case Dashboard", page_icon="📊")
 
 # Detect encoding
 def detect_encoding(file):
     raw = file.read()
     result = chardet.detect(raw)
-    file.seek(0)  # Reset pointer
+    file.seek(0)
     return result['encoding']
 
 # Load CSV data
@@ -46,7 +45,6 @@ def load_data(uploaded_file):
 
     return df
 
-# Categorize Last Note
 def categorize_case(note):
     if pd.isna(note) or str(note).strip() == '':
         return 'Not Triaged'
@@ -72,13 +70,10 @@ def categorize_case(note):
 
     return 'Not Triaged'
 
-# MAIN APP
 def main():
     st.title("📊 GPSSA Case Management Dashboard")
 
-    st.sidebar.markdown("### Developed by Anas H. Alrefai")
     st.sidebar.header("📂 Upload or Use Default CSV")
-
     uploaded_file = st.sidebar.file_uploader("Upload CSV file", type="csv")
 
     if uploaded_file:
@@ -155,9 +150,8 @@ def main():
 
         st.dataframe(grouped, use_container_width=True)
 
-        # 🔍 Add search for SR/Incident Number
         st.markdown("### 🔎 Search by SR/Incident Number")
-        search_input = st.text_input("Enter SR/Incident Number (e.g. 21456)", "")
+        search_input = st.text_input("Enter SR/Incident Number (e.g. 21456)", key="sr_search")
 
         if search_input.strip():
             matched_cases = filtered_data[filtered_data['SR/Incident Number'] == search_input.strip()]
@@ -166,6 +160,24 @@ def main():
                 st.dataframe(matched_cases, use_container_width=True)
             else:
                 st.warning(f"No cases found for SR/Incident Number: {search_input}")
+
+    else:
+        st.subheader("📋 Full Case List")
+        search_text = st.text_input("🔎 Search Case ID, Status or Note", key="general_search")
+        searchable_data = filtered_data.copy()
+
+        if search_text:
+            search_text = search_text.lower()
+            searchable_data = searchable_data[
+                searchable_data.apply(lambda row: search_text in str(row['Case Id']).lower()
+                                                   or search_text in str(row['Status']).lower()
+                                                   or search_text in str(row['Last Note']).lower(), axis=1)
+            ]
+
+        st.dataframe(searchable_data, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("🔧 **Developed by Anas H. Alrefai**")
 
 if __name__ == '__main__':
     main()
