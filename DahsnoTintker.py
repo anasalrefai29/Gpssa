@@ -155,5 +155,17 @@ def main():
 
         st.dataframe(grouped, use_container_width=True)
 
+        # 🔍 Add search for SR/Incident Number
+        st.markdown("### 🔎 Search by SR/Incident Number")
+        search_input = st.text_input("Enter SR/Incident Number (e.g. 21456)", "")
+
+        if search_input.strip():
+            matched_cases = filtered_data[filtered_data['SR/Incident Number'] == search_input.strip()]
+            if not matched_cases.empty:
+                st.success(f"Found {len(matched_cases)} case(s) linked to SR/Incident {search_input}")
+                st.dataframe(matched_cases, use_container_width=True)
+            else:
+                st.warning(f"No cases found for SR/Incident Number: {search_input}")
+
 if __name__ == '__main__':
     main()
