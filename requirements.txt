@@ -3,3 +3,4 @@ pandas
 chardet
 plotly
 matplotlib
+requests
