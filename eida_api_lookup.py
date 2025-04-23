@@ -1,41 +1,40 @@
 import streamlit as st
 import requests
+import json
 
-st.set_page_config(page_title="EIDA Personal Info Lookup", layout="centered")
+st.set_page_config(page_title="EIDA API Lookup", layout="centered")
 
 st.title("🔍 EIDA Personal Info Lookup")
 
-# Input fields
-eid = st.text_input("Enter Emirates ID:", placeholder="784199463790875")
-username = st.text_input("Username:", placeholder="user1")
-password = st.text_input("Password:", type="password", placeholder="password123")
+# Input field for Emirates ID
+emirates_id = st.text_input("Enter Emirates ID", max_chars=15, help="Enter full Emirates ID without spaces")
 
-# API Base URL
-BASE_URL = "http://172.23.12.77:7575/api/gsb/eida/get-personal-info/"
-
-# Button to fetch data
-if st.button("Fetch Info"):
-    if not eid or not username or not password:
-        st.warning("Please enter Emirates ID, username, and password.")
+# Submit button
+if st.button("Get Info"):
+    if not emirates_id:
+        st.warning("Please enter a valid Emirates ID.")
     else:
-        full_url = f"{BASE_URL}{eid}"
+        # API setup
+        url = f"http://172.23.12.77:7575/api/gsb/eida/get-personal-info/{emirates_id}"
         headers = {
-            "username": username,
-            "password": password
+            "username": "user1",
+            "password": "password123"
         }
 
         try:
-            response = requests.get(full_url, headers=headers, timeout=10)
+            with st.spinner("Fetching data from EIDA API..."):
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
 
-            if response.status_code == 200:
-                st.success("✅ Info Retrieved Successfully")
-                st.json(response.json())
-            elif response.status_code == 401:
-                st.error("❌ Unauthorized. Check your credentials.")
-            elif response.status_code == 404:
-                st.warning("⚠️ Record not found.")
-            else:
-                st.error(f"🚫 Error {response.status_code}: {response.text}")
+                st.success("✅ Data retrieved successfully!")
+                st.json(data)
 
-        except requests.exceptions.RequestException as e:
-            st.error(f"Connection Error: {e}")
+        except requests.exceptions.ConnectTimeout:
+            st.error("⏱️ Connection timed out. Make sure you're connected to the internal network or VPN.")
+        except requests.exceptions.ConnectionError:
+            st.error("🚫 Could not connect to the server. Please check the network or IP address.")
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ HTTP error occurred: {e}")
+        except Exception as e:
+            st.error(f"Unexpected error: {e}")
